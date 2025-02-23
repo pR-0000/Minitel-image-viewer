@@ -1,5 +1,7 @@
 # Minitel Image Viewer
 
+![Screenshot](https://github.com/pR-0000/Minitel-image-viewer/blob/main/GUI.png?raw=true)
+
 *Minitel Image Viewer* is a Python script with a graphical user interface that converts an image into a mosaic of characters compatible with Minitel terminals. The script resizes the source image to a resolution of 80×72 pixels (suitable for Minitel display) and converts it into character blocks using the Minitel color palette. The converted image can then be sent to the Minitel via a serial connection.
 
 ## Features
@@ -36,6 +38,8 @@
 ---
 
 # Minitel Image Viewer
+
+![Screenshot](https://github.com/pR-0000/Minitel-image-viewer/blob/main/GUI.png?raw=true)
 
 *Minitel Image Viewer* est un script Python doté d'une interface graphique qui permet de convertir une image en une mosaïque de caractères compatible avec les terminaux Minitel. Le script redimensionne l'image source à une résolution de 80×72 pixels (adaptée à l'affichage du Minitel) et la convertit en blocs de caractères en utilisant la palette de couleurs du Minitel. Il est ensuite possible d'envoyer cette image convertie au Minitel via une connexion série.
 
