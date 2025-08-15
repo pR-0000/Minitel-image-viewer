@@ -2,38 +2,79 @@
 
 ![Screenshot](https://github.com/pR-0000/Minitel-image-viewer/blob/main/GUI.png?raw=true)
 
-*Minitel Image Viewer* is a Python script with a graphical user interface that converts an image into a mosaic of characters compatible with Minitel terminals. The script resizes the source image to a resolution of 80×72 pixels (suitable for Minitel display) and converts it into character blocks using the Minitel color palette. The converted image can then be sent to the Minitel via a serial connection.
+*Minitel Image Viewer* is a Python app with a graphical interface that converts an image into the Minitel’s G1 mosaic character set and sends it to the terminal over serial. The image is prepared at **80×72 pixels** (2×3 pixel tiles per character, 40×24 chars) using the **fixed 8-color Minitel palette**, then encoded with efficient RLE.
 
 ## Features
 
-- **Image Conversion**: Resizes the source image to 80×72 pixels and converts it into Minitel blocks.
-- **Resizing Modes**:
-  - **Stretch (fill screen)**: The image is stretched to fill the entire resolution (distortion may occur).
-  - **Crop and center**: The image is resized while preserving its aspect ratio, then centered on a configurable background.
-- **Preview**: Interactive display of the converted image in color or grayscale.
-- **Serial Communication**: Sends the converted image to the Minitel terminal via a serial connection.
-- **Graphical Interface**: Built with Tkinter for user-friendly operation.
+* **Accurate Minitel conversion**
+
+  * Fixed **8-color palette** (RGB → indexed palette), optional **Floyd–Steinberg dithering**.
+  * G1 mosaic encoding (2×3 pixels per character) with **run-length repeats (DC2)**.
+  * Correct handling of “empty” blocks using **mosaic space (0x20)** so background color is actually rendered.
+* **Resizing modes**
+
+  * **Stretch (fill screen)**: fills 80×72 (can distort).
+  * **Crop and center**: preserves aspect ratio and pads with a chosen background color.
+* **Preview** in Color or Grayscale.
+* **Serial send** with logging (payload size & rough ETA), non-blocking UI.
+* **Port management**: list & **Refresh** available COM ports.
+* **Init sequence included** (on send & on export): disables local echo, hides cursor, clears screen, **clears line 0**, selects G1.
+* **Export to .vdt** (Videotex stream)
+
+  * Saves exactly what is sent to the terminal (init + image payload).
+  * Optional **STX/ETX** wrapping for players that expect it.
+* **Manual serial format** preserved
+
+  * Keep using your preferred 7E1/8N1 settings manually; speed auto-detection does **not** force a parity/data-bits change.
+
+## What’s new (since early versions)
+
+* Added **.vdt export** (replaces the older raw .bin export).
+* Dithering toggle, **Refresh ports** button.
+* More robust color handling after cursor moves; preservation of **line-0 clearing**.
+* Faster encoder (precompiled tables, bytearray assembly, palette indices).
+* Better logs (size + estimated time).
 
 ## Requirements
-- **Python 3.8+** (the application will install required libraries if they are not present).
+
+* **Python 3.8+** (the app auto-installs required libraries if missing).
+* Dependencies: **Pillow**, **pyserial** (installed automatically at first run).
 
 ## Usage
-1. Connect your Minitel to your computer using a compatible RS232/USB adapter.
-2. Run the application by double-clicking on `minitel_image_viewer.pyw` or, alternatively, run it via the command line:
+
+1. Connect your Minitel with a RS232/USB adapter.
+2. Launch:
+
    ```bash
    python "minitel_image_viewer.pyw"
    ```
-3. Image Selection: Click the "Select file" button to choose an image from your system. The selected file name will be displayed.
-4. Resizing Mode: Choose between "Stretch (fill screen)" and "Crop and center" to define the image processing method.
-5. Background Color: For the "Crop and center" mode, select the desired background color from the dropdown menu.
-6. Preview Mode: Select "Color" or "Grayscale" to view the converted image in color or grayscale.
-7. Preview: The converted image (80×72 pixels) is displayed in the preview frame, which has a fixed maximum size to prevent excessive resizing.
-8. Configure the serial settings to match your Minitel model.
-9. Send Image: Click "Send image to Minitel" to send the converted image to the Minitel terminal via the serial connection.
+3. **Select file** and choose a **Resizing mode**:
+
+   * *Stretch* or *Crop and center* (pick a background color for centering).
+4. Toggle **Dithering** (on/off). For clean flats, turn it off.
+5. Choose **Preview mode** (Color/Grayscale).
+6. Pick the **COM port** (use **Refresh** if needed).
+7. Set **baud rate**; adjust **7/8 data bits**, **parity**, **stop bits** if required by your setup.
+8. Click **Send image to Minitel**.
+
+   * The app sends an **init sequence**: disable echo, hide cursor, **clear screen**, **clear line 0**, select **G1**, then the encoded image.
+9. (Optional) Click **Export .vdt (Videotex)** to save the exact serial stream
+
+   * Tick **Add STX/ETX** if your viewer/player expects a framed stream.
+
+## Notes on the encoder
+
+* The converter works in **palette mode (“P”)** for speed and fidelity.
+* “Empty” blocks (all background) are printed with **mosaic space (0x20)** after setting **PAPER** (background color), so every cell really takes color (no black holes).
+* Repeats use **DC2 (0x12)** with a max chunk of 63; long runs are chunked automatically.
+* Cursor jumps are handled carefully; after any jump the encoder re-emits **PAPER/INK** before drawing.
 
 ## Troubleshooting
-- Ensure the correct COM port is selected and that no other application is using it.
-- For best results, consult your Minitel manual to verify compatibility and settings.
+
+* If you see unexpected black cells in large flats, ensure you’re using the latest version (empty-run handling was fixed).
+* Verify the selected COM port isn’t used by another app.
+* If your model is picky about serial format, set **7E1/8N1** manually in the GUI (speed auto-detect won’t change it).
+* Disable dithering to debug color blocks more easily.
 
 ---
 
@@ -41,35 +82,74 @@
 
 ![Screenshot](https://github.com/pR-0000/Minitel-image-viewer/blob/main/GUI.png?raw=true)
 
-*Minitel Image Viewer* est un script Python doté d'une interface graphique qui permet de convertir une image en une mosaïque de caractères compatible avec les terminaux Minitel. Le script redimensionne l'image source à une résolution de 80×72 pixels (adaptée à l'affichage du Minitel) et la convertit en blocs de caractères en utilisant la palette de couleurs du Minitel. Il est ensuite possible d'envoyer cette image convertie au Minitel via une connexion série.
+*Minitel Image Viewer* est une application Python avec interface graphique qui convertit une image vers le jeu de caractères mosaïque **G1** du Minitel et l’envoie au terminal via la liaison série. L’image est préparée en **80×72 px** (tuiles 2×3 par caractère, 40×24 caractères) avec la **palette Minitel 8 couleurs**, puis encodée avec RLE.
 
 ## Fonctionnalités
 
-- **Conversion d'image** : Redimensionnement de l'image source à 80×72 pixels et conversion en blocs Minitel.
-- **Modes de redimensionnement** :
-  - **Stretch (fill screen)** : L'image est étirée pour remplir toute la résolution (déformation possible).
-  - **Crop and center** : L'image est redimensionnée en conservant son ratio d'aspect, puis centrée sur un fond configurable.
-- **Prévisualisation** : Affichage interactif de l'image convertie en couleur ou en niveaux de gris.
-- **Communication série** : Envoi de l'image convertie au terminal Minitel via une connexion série.
-- **Interface graphique** : Conçue avec Tkinter pour une utilisation conviviale.
+* **Conversion fidèle Minitel**
+
+  * Palette fixe **8 couleurs**, **tramage Floyd–Steinberg** optionnel.
+  * Encodage mosaïque G1 (2×3 px) avec **répétitions RLE (DC2)**.
+  * Gestion correcte des blocs « vides » via **espace mosaïque (0x20)** pour appliquer réellement la couleur de fond.
+* **Modes de redimensionnement**
+
+  * **Stretch (fill screen)** : remplit 80×72 (peut déformer).
+  * **Crop and center** : conserve le ratio et ajoute des bandes de la couleur de fond choisie.
+* **Prévisualisation** en couleur ou niveaux de gris.
+* **Envoi série** avec journal (taille + estimation de durée), UI non bloquante.
+* **Gestion des ports** : liste & **Rafraîchir** les ports disponibles.
+* **Séquence d’initialisation** incluse (à l’envoi et à l’export) : désactive l’écho local, masque le curseur, efface l’écran, **efface la ligne 0**, sélectionne G1.
+* **Export .vdt** (flux Videotex)
+
+  * Sauvegarde **exactement** ce qui est envoyé au terminal (init + image).
+  * Option **STX/ETX** pour les lecteurs qui l’exigent.
+* **Réglages manuels série** conservés
+
+  * Le choix **7E1/8N1** reste manuel ; l’auto-détection de vitesse ne force pas de changement de parité/bits.
+
+## Nouveautés (depuis les premières versions)
+
+* Export **.vdt** (remplace l’ancien .bin brut).
+* Case **Dithering**, bouton **Rafraîchir** les ports.
+* Rendu couleur robuste après déplacements de curseur ; **effacement de la ligne 0** conservé.
+* Encodeur plus rapide (tables précompilées, `bytearray`, indices palette).
+* Journaux plus informatifs (taille + estimation).
 
 ## Exigences
-- **Python 3.8+** (l'application installera les bibliothèques nécessaires si elles ne sont pas présentes).
+
+* **Python 3.8+** (les dépendances **Pillow** et **pyserial** sont installées automatiquement au premier lancement).
 
 ## Utilisation
-1. Connectez votre Minitel à votre ordinateur à l'aide d'un adaptateur RS232/USB compatible.
-2. Lancez l'application en double-cliquant sur `minitel_image_viewer.pyw` ou, alternativement, via la ligne de commande :
+
+1. Reliez le Minitel via un adaptateur RS232/USB.
+2. Lancez :
+
    ```bash
    python "minitel_image_viewer.pyw"
    ```
-3. Sélection d'image : Cliquez sur le bouton "Select file" pour choisir une image sur votre système. Le nom du fichier sélectionné s'affiche.
-4. Mode de redimensionnement : Choisissez entre "Stretch (fill screen)" et "Crop and center" pour définir la méthode de traitement de l'image.
-5. Couleur de fond : Pour le mode "Crop and center", sélectionnez la couleur de fond souhaitée dans le menu déroulant.
-6. Mode de prévisualisation : Sélectionnez "Color" ou "Grayscale" pour voir l'image convertie en couleur ou en niveaux de gris.
-7. Prévisualisation : L'image convertie (80×72 pixels) est affichée dans le cadre de prévisualisation, qui dispose d'une taille maximale fixe pour éviter des redimensionnements excessifs.
-8. Configurez les paramètres de communication série pour correspondre à votre modèle de Minitel.
-9. Envoi de l'image : Cliquez sur "Send image to Minitel" pour envoyer l'image convertie au terminal Minitel via la connexion série.
+3. **Select file** : choisissez une image.
+4. Sélectionnez un **mode de redimensionnement** (Stretch ou Crop and center) et la **couleur de fond** si nécessaire.
+5. Activez/désactivez le **Dithering**.
+6. Choisissez le **mode de prévisualisation** (Color/Grayscale).
+7. Sélectionnez le **port COM** (bouton **Refresh** si besoin).
+8. Réglez le **débit** et, si nécessaire, **7/8 bits**, **parité**, **bits de stop**.
+9. Cliquez sur **Send image to Minitel**.
+
+   * L’application envoie d’abord une **séquence d’init** : désactivation de l’écho, masquage du curseur, **clear screen**, **clear ligne 0**, sélection **G1**, puis l’image encodée.
+10. (Optionnel) Cliquez sur **Export .vdt (Videotex)** pour sauvegarder le flux exact
+
+    * Cochez **Ajouter STX/ETX** si votre lecteur attend un flux encadré.
+
+## Notes sur l’encodeur
+
+* Conversion en **mode palette (“P”)** pour rapidité et fidélité.
+* Les blocs « vides » sont imprimés avec **0x20** après réglage du **PAPER** (couleur de fond) : chaque cellule reçoit bien sa couleur (pas de “trous” noirs).
+* Répétitions via **DC2 (0x12)** (paquets ≤63, segmentés au-delà).
+* Après un saut de curseur, **PAPER/INK** sont ré-émis avant de tracer.
 
 ## Dépannage
-- Vérifiez que le bon port COM est sélectionné et qu'aucune autre application ne l'utilise.
-- Pour de meilleurs résultats, consultez le manuel de votre Minitel afin de vérifier la compatibilité et les réglages.
+
+* Si vous constatez des cellules noires dans de grands aplats, mettez à jour vers la dernière version (gestion des blocs vides corrigée).
+* Vérifiez que le bon port COM est sélectionné et qu’il n’est pas utilisé ailleurs.
+* Certains modèles exigent un format série particulier : ajustez **7E1/8N1** manuellement dans l’interface.
+* Désactivez le tramage pour faciliter le diagnostic des aplats/couleurs.
