@@ -19,7 +19,7 @@ except ImportError:
     from PIL import Image, ImageTk
 
 # --- Version & Constantes -----------------------------------------------------
-version = 0.2
+version = "0.2.1"
 CHAR_WIDTH, CHAR_HEIGHT = 2, 3
 TARGET_W, TARGET_H = 80, 72  # pixels Minitel en mode mosaïque (2x3 par caractère)
 RLE_MAX = 63
@@ -44,10 +44,11 @@ def detect_and_configure_minitel(port_name):
         0x79: ("Minitel 5", 1200),
         0x7A: ("Minitel 12", 1200),
     }
+    # PROBE 7E1 UNIQUEMENT, y compris à 9600 bps
     speeds_to_try = [
         (1200, serial.SEVENBITS, serial.PARITY_EVEN),
         (4800, serial.SEVENBITS, serial.PARITY_EVEN),
-        (9600, serial.EIGHTBITS, serial.PARITY_NONE),
+        (9600, serial.SEVENBITS, serial.PARITY_EVEN),
     ]
     for baud, bits, parity in speeds_to_try:
         try:
@@ -63,7 +64,7 @@ def detect_and_configure_minitel(port_name):
             if len(resp) >= 5 and resp[0] == 0x01 and resp[4] == 0x04:
                 type_code = resp[2]
                 model_info, target_speed = types.get(type_code, ("Inconnu", 1200))
-                # Tenter de fixer la vitesse côté Minitel si différent (par ESC : k)
+                # Tenter de fixer la VITESSE côté Minitel (framing non modifié)
                 if target_speed != baud:
                     try:
                         ser = serial.Serial(
@@ -71,8 +72,8 @@ def detect_and_configure_minitel(port_name):
                             stopbits=serial.STOPBITS_ONE, timeout=1
                         )
                         speed_bits = {4800: 0b110, 9600: 0b111}.get(target_speed, 0b100)  # 1200=100
-                        config_byte = (1 << 6) | (speed_bits << 3) | speed_bits  # P=0,1,E,R
-                        ser.write(b'\x1B\x3A\x6B' + bytes([config_byte]))
+                        config_byte = (1 << 6) | (speed_bits << 3) | speed_bits  # P=0,1,E, R
+                        ser.write(b'\x1B\x3A\x6B' + bytes([config_byte]))  # ESC : k
                         time.sleep(0.2)
                         ser.close()
                     except Exception:
@@ -82,20 +83,21 @@ def detect_and_configure_minitel(port_name):
             pass
     return "Inconnu", 1200
 
-# --- Séquence d'initialisation VDT (echo off, curseur off, CLS, clear line 0, G1)
+# --- Séquence d'initialisation VDT (echo off, curseur off, CLS, clear line 0, HOME, G1)
 def build_init_sequence():
     # ESC ; ` X R  = désactiver écho local (séquence standard Tulipe)
     # DC4 (0x14)   = masquer le curseur
     # FF  (0x0C)   = effacer l'écran
     # US,row,col   = positionner en (ligne 0, col 1) puis EL (0x18) deux fois pour être sûr
-    # SO  (0x0E)   = passer en jeu de caractères mosaïque G1
+    # RS  (0x1E)   = HOME (ligne 0, col 0)
+    # SO  (0x0E)   = passer en jeu de caractères mosaïque G1 (requis pour l’affichage)
     return (
         b'\x1B\x3B\x60\x58\x52'  # désactiver écho local
         b'\x14'                  # masquer curseur
         b'\x0C'                  # effacer écran
         b'\x1F\x40\x41'          # US + row=0x40 (ligne 0), col=0x41 (col 1)
         b'\x18\x18'              # EL ×2 (effacer ligne 0)
-        b'\x1E'                  # Home (1ere ligne, 1ere colonne)
+        b'\x1E'                  # HOME (0,0)
         b'\x0E'                  # G1
     )
 
@@ -122,7 +124,6 @@ minitel_color_names = {
 }
 
 # Codes couleur (en hex) -> précompilés en octets (paper puis ink)
-# Mapping original: (ink_hex, paper_hex)
 color_codes = {
     (0, 0, 0): ("1B40", "1B50"),
     (255, 0, 0): ("1B41", "1B51"),
@@ -160,8 +161,7 @@ PIXEL_TO_G1 = { k: int(v, 16) for k, v in pixel_to_g1_code.items() }
 
 # --- Quantification vers palette Minitel -------------------------------------
 def convert_image_to_minitel_palette(img, dither=True):
-    """Quantize l'image sur la palette 8 couleurs Minitel (mode 'P').
-       dither=True utilise Floyd–Steinberg, souvent meilleur visuellement."""
+    """Quantize l'image sur la palette 8 couleurs Minitel (mode 'P')."""
     img = img.convert("RGB")
     pal_img = Image.new("P", (1, 1))
     flat = sum(minitel_palette, ()) + (0,) * ((256 - 8) * 3)
@@ -187,7 +187,6 @@ def get_preview_image(filepath, mode="resize", bg_color=(0, 0, 0), dither=True):
         canvas.paste(image, (left, top))
         image = canvas
 
-    # Retourne l'image quantifiée (mode P)
     imgP = convert_image_to_minitel_palette(image, dither=dither)
     return imgP
 
@@ -216,12 +215,10 @@ def image_P_to_G1_bytes(imgP):
 
             bits = ''.join('1' if v == fg else '0' for v in block)
 
-            # --- RUN DE BLOCS VIDES (même couleur de fond!) -----------------------
+            # --- RUN DE BLOCS VIDES (même couleur de fond)
             if bits == '000000':
                 run = 1
-                run_bg = bg  # on fige la couleur de fond du run
-
-                # Étendre le run tant que: bloc vide ET même bg
+                run_bg = bg
                 while x + run < chars_x:
                     xr = x + run
                     xr0 = xr * 2
@@ -235,25 +232,21 @@ def image_P_to_G1_bytes(imgP):
                         break
                     run += 1
 
-                # S'assurer que le PAPER (fond) voulu est actif AVANT d'écrire des espaces
                 if last_bg != run_bg:
                     bg_rgb = minitel_palette[run_bg]
                     out.extend(COLOR_SET[bg_rgb][0])  # PAPER
                     last_bg = run_bg
-                    # on ne touche pas l'INK ici ; il sera réglé sur les blocs non vides
 
-                # Émettre des espaces mosaïque (0x20) avec RLE (par paquets ≤ 64)
                 remaining = run
                 while remaining > 0:
                     batch = min(64, remaining)
-                    out.append(0x20)                      # premier espace
+                    out.append(0x20)                      # espace mosaïque
                     if batch > 1:
-                        out.extend((0x12, 0x40 + (batch - 1)))  # répéter batch-1
+                        out.extend((0x12, 0x40 + (batch - 1)))  # RLE
                     remaining -= batch
 
                 x += run
                 continue
-            # ----------------------------------------------------------------------
 
             # Couleurs (paper+ink) si changement
             if (bg != last_bg) or (fg != last_fg):
@@ -292,7 +285,7 @@ def image_P_to_G1_bytes(imgP):
     return bytes(out)
 
 def image_to_G1(filepath, mode="resize", bg_color=(0, 0, 0), dither=True):
-    imgP = get_preview_image(filepath, mode, bg_color, dither=dither)  # mode 'P'
+    imgP = get_preview_image(filepath, mode, bg_color, dither=dither)
     return image_P_to_G1_bytes(imgP)
 
 # --- GUI ---------------------------------------------------------------------
@@ -362,7 +355,6 @@ def open_gui():
         mode = mode_var.get()
         bg_color = minitel_color_names.get(bg_color_var.get(), (0, 0, 0)) if mode == "center" else (0, 0, 0)
         imgP = get_preview_image(image_file_var.get(), mode, bg_color, dither=dither_var.get())
-        # Pour l'aperçu: RGB (option NB si demandé)
         preview_img = imgP.convert("RGB")
         if preview_mode_var.get() == "Grayscale":
             preview_img = preview_img.convert("L").convert("RGB")
@@ -385,12 +377,10 @@ def open_gui():
         if image_file_var.get() == "No files selected":
             messagebox.showwarning("No file", "Please select an image first.")
             return
-        payload = build_stream()                   # seulement l'image (sans init)
+        payload = build_stream()                   # image seule
         vdt = build_init_sequence() + payload      # init + image
-
         if wrap_stx_etx_var.get():
-            vdt = b'\x02' + vdt + b'\x03'         # Optionnel: STX/ETX
-
+            vdt = b'\x02' + vdt + b'\x03'         # STX/ETX (optionnel)
         path = filedialog.asksaveasfilename(
             title="Exporter en .vdt",
             defaultextension=".vdt",
@@ -431,24 +421,21 @@ def open_gui():
             log_message("Error: No image selected.")
             return
 
-        # Auto-détect vitesse (n'ajuste pas 7E1/8N1 automatiquement)
+        # Auto-détect vitesse (NE CHANGE PAS 7E1/8N1 automatiquement)
         if auto_connect_var.get():
             model_detected, speed = detect_and_configure_minitel(selected_com)
             baudrate_var.set(speed)
             log_message(f"Auto-detection: {model_detected} à {speed} bps")
 
-        # Préparer payload
         payload = build_stream()
         size = len(payload)
         baud = baudrate_var.get()
         bits = 7 if data_bits_var.get() == 7 else 8
         parity = parity_var.get().lower()
         stop = stop_bits_var.get()
-        # Estimation (approx) : 10 bits/char à 7E1 ~ 10, à 8N1 ~ 10
         t_est = size * 10 / max(baud, 1)
         log_message(f"Payload: {size} octets — Estimé: {t_est:.2f}s @ {baud} bps")
 
-        # Préparer Serial kwargs selon réglages manuels
         serial_kwargs = dict(
             baudrate=baudrate_var.get(),
             bytesize=serial.SEVENBITS if bits == 7 else serial.EIGHTBITS,
@@ -483,8 +470,7 @@ def open_gui():
     dither_cb = tk.Checkbutton(window, text="Dithering (Floyd–Steinberg)", variable=dither_var, command=update_preview)
     dither_cb.grid(row=4, column=0, columnspan=3, sticky="w", padx=6, pady=2)
 
-    wrap_cb = tk.Checkbutton(window, text="Ajouter STX/ETX (pour certains lecteurs VDT)", 
-                             variable=wrap_stx_etx_var)
+    wrap_cb = tk.Checkbutton(window, text="Ajouter STX/ETX (pour certains lecteurs VDT)", variable=wrap_stx_etx_var)
     wrap_cb.grid(row=4, column=1, columnspan=2, sticky="w", padx=6, pady=2)
 
     preview_frame = tk.Frame(window, bd=2, relief="sunken", width=500, height=360)
